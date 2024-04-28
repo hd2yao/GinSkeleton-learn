@@ -23,11 +23,6 @@
 
 
 
-#### V 1.5.61  2023-12-14（最新版本）
-**更新** 
-- 1.项目依赖包全部更新至最新版.  
-- 2.文件上传不允许空文件.
-
-
-### 感谢 jetbrains 为本项目提供的 goland 激活码
-![https://www.jetbrains.com/](https://www.ginskeleton.com/images/jetbrains.jpg)
+#### V 1.5.62 2024-04-28（最新版本）
+**更新**
+1.项目依赖包全部更新至最新版.
