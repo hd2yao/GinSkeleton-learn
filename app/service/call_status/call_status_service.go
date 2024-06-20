@@ -1,10 +1,13 @@
 package call_status
 
 import (
+    "strconv"
+    "time"
+
     "goskeleton/app/http/controller/api/video/video_data"
     "goskeleton/app/model/call_log"
     "goskeleton/app/model/home_user"
-    "time"
+    "goskeleton/app/service/websocket"
 )
 
 type CallStatusService struct{}
@@ -48,6 +51,8 @@ func (c *CallStatusService) Handle(form video_data.ActiveVali) error {
         data2.CallStatus = 2
         call_log.CreateCallLogModelFactory("").InsertData(&data2)
         // 通过 ws 向未接听一方推送通话记录
+        userIdStr := strconv.Itoa(data2.FkUserId)
+        go websocket.Pub(userIdStr)
     }
     // 修改网关双方的通话状态
     home_user.CreateHomeModelFactory("").UpdateIsCall(form.FkUserId, form.FkFriendId, 0)
