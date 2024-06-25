@@ -78,7 +78,7 @@ func InitApiRouter() *gin.Engine {
             // 插入通话记录
             call.POST("log", callCtrl.HandleStatus)
             // 通话中挂断调用
-
+            call.POST("ring/off", callCtrl.RingOff)
             // 查询是否在通话中
 
             // 查询最长通话时间
