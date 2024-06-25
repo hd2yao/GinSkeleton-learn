@@ -57,6 +57,17 @@ func (c *CallLogModel) FindById(fkUserId, fkFriendId, types int) (data CallLogMo
 	return data
 }
 
+// FindIsCallById 查询指定用户是否正在通话中
+// 如果用户正在通话中，则会有两条记录，只返回其中一条即可
+func (c *CallLogModel) FindIsCallById(fkFriendId int) (data CallLogModel) {
+	data = CallLogModel{}
+	c.Model(c).
+		Where("fk_user_id = ? or fk_friend_id = ?", fkFriendId, fkFriendId).
+		Where("is_call = 1").
+		Order("id desc").First(&data)
+	return data
+}
+
 // UpdateIsCall 根据通话双方 id 将指定通话记录的状态从通话中更改为不在不在通话中
 func (c *CallLogModel) UpdateIsCall(fkUserId, fkFriendId int) {
 	c.Model(c).Where("fk_user_id = ?", fkUserId).

@@ -1,16 +1,18 @@
 package routers
 
 import (
+    "net/http"
+
     "github.com/gin-contrib/pprof"
     "github.com/gin-gonic/gin"
     "go.uber.org/zap"
+
     "goskeleton/app/global/consts"
     "goskeleton/app/global/variable"
     "goskeleton/app/http/controller/api/video"
     "goskeleton/app/http/middleware/cors"
     validatorFactory "goskeleton/app/http/validator/core/factory"
     "goskeleton/app/utils/gin_release"
-    "net/http"
 )
 
 // 该路由主要设置门户类网站等前台路由
@@ -80,7 +82,7 @@ func InitApiRouter() *gin.Engine {
             // 通话中挂断调用
             call.POST("ring/off", callCtrl.RingOff)
             // 查询是否在通话中
-
+            call.GET("is/call", callCtrl.IsCall)
             // 查询最长通话时间
 
             // 处理异常状态
