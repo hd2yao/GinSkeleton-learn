@@ -1,15 +1,18 @@
 package routers
 
 import (
+	"net/http"
+
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+
 	"goskeleton/app/global/consts"
 	"goskeleton/app/global/variable"
+	"goskeleton/app/http/controller/api/video"
 	"goskeleton/app/http/middleware/cors"
 	validatorFactory "goskeleton/app/http/validator/core/factory"
 	"goskeleton/app/utils/gin_release"
-	"net/http"
 )
 
 // 该路由主要设置门户类网站等前台路由
@@ -68,6 +71,20 @@ func InitApiRouter() *gin.Engine {
 			// 2.编写该接口的验证器，位置：app/http/validator/api/home/news.go
 			// 3.将以上验证器注册在容器：app/http/validator/common/register_validator/api_register_validator.go  18 行为注册时的键（consts.ValidatorPrefix + "HomeNews"）。那么获取的时候就用该键即可从容器获取
 			home.GET("news", validatorFactory.Create(consts.ValidatorPrefix+"HomeNews"))
+		}
+
+		// 视频通话相关接口
+		call := vApi.Group("call/")
+		{
+			callCtrl := video.VideoStatus{}
+			// 插入通话记录
+			call.POST("log", callCtrl.HandleStatus)
+			// 通话中挂断调用
+			call.POST("ring/off", callCtrl.RingOff)
+			// 查询是否在通话中
+			call.GET("is/call", callCtrl.IsCall)
+			// 处理异常状态
+			call.POST("error", video.ErrorType{}.HandleError)
 		}
 	}
 	return router
