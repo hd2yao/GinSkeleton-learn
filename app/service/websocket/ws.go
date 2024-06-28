@@ -1,8 +1,13 @@
 package websocket
 
 import (
+	"encoding/json"
 	"fmt"
+	"goskeleton/app/model/friend_user"
+	"goskeleton/app/model/home_user"
 	"goskeleton/app/model/oldster_user"
+	"goskeleton/app/model/room"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -42,11 +47,52 @@ func (w *Ws) OnOpen(context *gin.Context) (*Ws, bool) {
 		client.UserId = int64(context.GetFloat64(consts.ValidatorPrefix + "user_id"))
 		client.HomeId = int64(context.GetFloat64(consts.ValidatorPrefix + "home_id"))
 		client.UserType = context.GetString(consts.ValidatorPrefix + "user_type")
+		// 区域用于主动关爱推送消息
 		userInfo := oldster_user.CreateOldsterUserModelFactory("").GetById(client.UserId)
 		client.CityId = int64(userInfo.FkProvinceCityId)
 
+		// 触发 onOpen 后，推送全部的信息
+		HandleMsg(client, true)
+
 		w.WsClient = client
+		variable.ZapLog.Info("用户上线:ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + "类型：" + w.WsClient.UserType)
 		go w.WsClient.Heartbeat() // 一旦握手+协议升级成功，就为每一个连接开启一个自动化的隐式心跳检测包
+
+		// 上线的如果是小程序，则判断是否在呼叫过程中，如果在呼叫过程中，则发送消息
+		// 此时上线的小程序用户是被呼叫方
+		if client.UserType == "mobile" {
+			// 查询通话状态
+			callId := home_user.CreateHomeModelFactory("").GetCallId(int(client.UserId))
+			if callId != 0 {
+				// 将呼叫方的信息返回给当前上线的小程序用户
+				returnCalled := ReturnClientMsg{}
+				returnCalled.Code = 200
+				returnCalled.Msg = "success"
+				returnCalled.Data.Type = 1
+				returnCalled.Data.UserId = int64(callId)
+				// 呼叫方创建的视频通话房间
+				returnCalled.Data.RoomId = room.CreateRoomModelFactory("").GetRoomId(callId)
+
+				// 查询是否给呼叫方设置备注
+				callFriendData := friend_user.CreateFriendUserModelFactory("").GetByUserIdAndFriendId(int(w.WsClient.HomeId), callId)
+				userInfo := home_user.CreateHomeModelFactory("").GetHomeUser(int64(callId))
+				returnCalled.Data.DeviceType = userInfo.DeviceType
+				returnCalled.Data.UserIdCallerAvatar = userInfo.Avatar
+				returnCalled.Data.HandFree = callFriendData.HandsFree
+				if callFriendData.NickName != "" {
+					returnCalled.Data.UserIdCallerTitle = callFriendData.NickName
+				} else {
+					returnCalled.Data.UserIdCallerTitle = userInfo.Title
+				}
+				returnCalledStr, _ := json.Marshal(returnCalled)
+				if err := w.WsClient.SendMessage(1, string(returnCalledStr)); err != nil {
+					variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
+				} else {
+					variable.ZapLog.Info("已经发送成功ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + string(returnCalledStr))
+				}
+			}
+		}
+
 		return w, true
 	} else {
 		return nil, false
