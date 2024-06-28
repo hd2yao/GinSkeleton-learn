@@ -3,10 +3,7 @@ package websocket
 import (
 	"encoding/json"
 	"fmt"
-	"goskeleton/app/model/friend_user"
-	"goskeleton/app/model/home_user"
-	"goskeleton/app/model/oldster_user"
-	"goskeleton/app/model/room"
+	"goskeleton/app/model/call_log"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +13,10 @@ import (
 	"goskeleton/app/global/consts"
 	"goskeleton/app/global/my_errors"
 	"goskeleton/app/global/variable"
+	"goskeleton/app/model/friend_user"
+	"goskeleton/app/model/home_user"
+	"goskeleton/app/model/oldster_user"
+	"goskeleton/app/model/room"
 	"goskeleton/app/utils/websocket/core"
 )
 
@@ -124,7 +125,28 @@ func (w *Ws) OnError(err error) {
 
 // OnClose 客户端关闭回调，发生onError回调以后会继续回调该函数
 func (w *Ws) OnClose() {
+	// 触发 onClose 时，需要把在播状态清除
+	if w.WsClient.UserType != "web" {
+		// 更新通话用户双方的状态
+		homeId := w.WsClient.HomeId
+		homeInfo := home_user.CreateHomeModelFactory("").GetHomeUser(homeId)
+		fkFriendId := homeInfo.IsCall
+		if fkFriendId != 0 {
+			home_user.CreateHomeModelFactory("").UpdateIsCall(int(homeId), fkFriendId, 0)
+		}
 
+		// 更新通话记录的通话状态
+		callLogData := call_log.CreateCallLogModelFactory("").GetByFkUserId(homeId)
+		if callLogData.Id != 0 {
+			callLogData.IsCall = 0
+			// 修改当前用户的通话记录状态
+			call_log.CreateCallLogModelFactory("").UpdateData(&callLogData)
+			// 修改对方的通话记录状态
+			call_log.CreateCallLogModelFactory("").UpdateIsCall(callLogData.FkFriendId, callLogData.FkUserId)
+		}
+	}
+	variable.ZapLog.Info("用户下线；ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + "类型：" + w.WsClient.UserType)
+	w.WsClient.State = 0
 	w.WsClient.Hub.UnRegister <- w.WsClient // 向hub管道投递一条注销消息，由hub中心负责关闭连接、删除在线数据
 }
 
