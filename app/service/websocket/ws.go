@@ -1,13 +1,22 @@
 package websocket
 
 import (
+	"encoding/json"
 	"fmt"
+	"goskeleton/app/model/call_log"
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+
 	"goskeleton/app/global/consts"
 	"goskeleton/app/global/my_errors"
 	"goskeleton/app/global/variable"
+	"goskeleton/app/model/friend_user"
+	"goskeleton/app/model/home_user"
+	"goskeleton/app/model/oldster_user"
+	"goskeleton/app/model/room"
 	"goskeleton/app/utils/websocket/core"
 )
 
@@ -27,8 +36,8 @@ type Ws struct {
 func (w *Ws) OnOpen(context *gin.Context) (*Ws, bool) {
 	if client, ok := (&core.Client{}).OnOpen(context); ok {
 
-		token := context.GetString(consts.ValidatorPrefix + "token")
-		variable.ZapLog.Info("获取到的客户端上线时携带的唯一标记值：", zap.String("token", token))
+		//token := context.GetString(consts.ValidatorPrefix + "token")
+		//variable.ZapLog.Info("获取到的客户端上线时携带的唯一标记值：", zap.String("token", token))
 
 		// 成功上线以后，开发者可以基于客户端上线时携带的唯一参数(这里用token键表示)
 		// 在数据库查询更多的其他字段信息，直接追加在 Client 结构体上，方便后续使用
@@ -36,8 +45,55 @@ func (w *Ws) OnOpen(context *gin.Context) (*Ws, bool) {
 		//client.ClientMoreParams.UserParams2 = "456"
 		//fmt.Printf("最终每一个客户端(client) 已有的参数：%+v\n", client)
 
+		client.UserId = int64(context.GetFloat64(consts.ValidatorPrefix + "user_id"))
+		client.HomeId = int64(context.GetFloat64(consts.ValidatorPrefix + "home_id"))
+		client.UserType = context.GetString(consts.ValidatorPrefix + "user_type")
+		// 区域用于主动关爱推送消息
+		userInfo := oldster_user.CreateOldsterUserModelFactory("").GetById(client.UserId)
+		client.CityId = int64(userInfo.FkProvinceCityId)
+
+		// 触发 onOpen 后，推送全部的信息
+		HandleMsg(client, true)
+
 		w.WsClient = client
+		variable.ZapLog.Info("用户上线:ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + "类型：" + w.WsClient.UserType)
 		go w.WsClient.Heartbeat() // 一旦握手+协议升级成功，就为每一个连接开启一个自动化的隐式心跳检测包
+
+		// 上线的如果是小程序，则判断是否在呼叫过程中，如果在呼叫过程中，则发送消息
+		// 此时上线的小程序用户是被呼叫方
+		if client.UserType == "mobile" {
+			// 查询通话状态
+			callId := home_user.CreateHomeModelFactory("").GetCallId(int(client.UserId))
+			if callId != 0 {
+				// 将呼叫方的信息返回给当前上线的小程序用户
+				returnCalled := ReturnClientMsg{}
+				returnCalled.Code = 200
+				returnCalled.Msg = "success"
+				returnCalled.Data.Type = 1
+				returnCalled.Data.UserId = int64(callId)
+				// 呼叫方创建的视频通话房间
+				returnCalled.Data.RoomId = room.CreateRoomModelFactory("").GetRoomId(callId)
+
+				// 查询是否给呼叫方设置备注
+				callFriendData := friend_user.CreateFriendUserModelFactory("").GetByUserIdAndFriendId(int(w.WsClient.HomeId), callId)
+				userInfo := home_user.CreateHomeModelFactory("").GetHomeUser(int64(callId))
+				returnCalled.Data.DeviceType = userInfo.DeviceType
+				returnCalled.Data.UserIdCallerAvatar = userInfo.Avatar
+				returnCalled.Data.HandFree = callFriendData.HandsFree
+				if callFriendData.NickName != "" {
+					returnCalled.Data.UserIdCallerTitle = callFriendData.NickName
+				} else {
+					returnCalled.Data.UserIdCallerTitle = userInfo.Title
+				}
+				returnCalledStr, _ := json.Marshal(returnCalled)
+				if err := w.WsClient.SendMessage(1, string(returnCalledStr)); err != nil {
+					variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
+				} else {
+					variable.ZapLog.Info("已经发送成功ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + string(returnCalledStr))
+				}
+			}
+		}
+
 		return w, true
 	} else {
 		return nil, false
@@ -69,7 +125,28 @@ func (w *Ws) OnError(err error) {
 
 // OnClose 客户端关闭回调，发生onError回调以后会继续回调该函数
 func (w *Ws) OnClose() {
+	// 触发 onClose 时，需要把在播状态清除
+	if w.WsClient.UserType != "web" {
+		// 更新通话用户双方的状态
+		homeId := w.WsClient.HomeId
+		homeInfo := home_user.CreateHomeModelFactory("").GetHomeUser(homeId)
+		fkFriendId := homeInfo.IsCall
+		if fkFriendId != 0 {
+			home_user.CreateHomeModelFactory("").UpdateIsCall(int(homeId), fkFriendId, 0)
+		}
 
+		// 更新通话记录的通话状态
+		callLogData := call_log.CreateCallLogModelFactory("").GetByFkUserId(homeId)
+		if callLogData.Id != 0 {
+			callLogData.IsCall = 0
+			// 修改当前用户的通话记录状态
+			call_log.CreateCallLogModelFactory("").UpdateData(&callLogData)
+			// 修改对方的通话记录状态
+			call_log.CreateCallLogModelFactory("").UpdateIsCall(callLogData.FkFriendId, callLogData.FkUserId)
+		}
+	}
+	variable.ZapLog.Info("用户下线；ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + "类型：" + w.WsClient.UserType)
+	w.WsClient.State = 0
 	w.WsClient.Hub.UnRegister <- w.WsClient // 向hub管道投递一条注销消息，由hub中心负责关闭连接、删除在线数据
 }
 

@@ -68,6 +68,14 @@ func (c *CallLogModel) FindIsCallById(fkFriendId int) (data CallLogModel) {
 	return data
 }
 
+// GetByFkUserId 查询用户的最新一条正在通话的通话记录
+func (c *CallLogModel) GetByFkUserId(fkUserId int64) (data CallLogModel) {
+	data = CallLogModel{}
+	c.Model(c).Where("fk_user_id = ?", fkUserId).Where("is_call = 1").
+		Order("id DESC").First(&data)
+	return data
+}
+
 // UpdateIsCall 根据通话双方 id 将指定通话记录的状态从通话中更改为不在不在通话中
 func (c *CallLogModel) UpdateIsCall(fkUserId, fkFriendId int) {
 	c.Model(c).Where("fk_user_id = ?", fkUserId).
