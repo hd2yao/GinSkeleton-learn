@@ -2,9 +2,11 @@ package websocket
 
 import (
 	"fmt"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+
 	"goskeleton/app/global/consts"
 	"goskeleton/app/global/my_errors"
 	"goskeleton/app/global/variable"
@@ -27,14 +29,17 @@ type Ws struct {
 func (w *Ws) OnOpen(context *gin.Context) (*Ws, bool) {
 	if client, ok := (&core.Client{}).OnOpen(context); ok {
 
-		token := context.GetString(consts.ValidatorPrefix + "token")
-		variable.ZapLog.Info("获取到的客户端上线时携带的唯一标记值：", zap.String("token", token))
+		//token := context.GetString(consts.ValidatorPrefix + "token")
+		//variable.ZapLog.Info("获取到的客户端上线时携带的唯一标记值：", zap.String("token", token))
 
 		// 成功上线以后，开发者可以基于客户端上线时携带的唯一参数(这里用token键表示)
 		// 在数据库查询更多的其他字段信息，直接追加在 Client 结构体上，方便后续使用
 		//client.ClientMoreParams.UserParams1 = "123"
 		//client.ClientMoreParams.UserParams2 = "456"
 		//fmt.Printf("最终每一个客户端(client) 已有的参数：%+v\n", client)
+		client.UserId = int64(context.GetFloat64(consts.ValidatorPrefix + "user_id"))
+		client.HomeId = int64(context.GetFloat64(consts.ValidatorPrefix + "home_id"))
+		client.UserType = context.GetString(consts.ValidatorPrefix + "user_type")
 
 		w.WsClient = client
 		go w.WsClient.Heartbeat() // 一旦握手+协议升级成功，就为每一个连接开启一个自动化的隐式心跳检测包
