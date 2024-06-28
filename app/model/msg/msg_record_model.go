@@ -1,6 +1,11 @@
 package msg
 
-import "goskeleton/app/model"
+import (
+    "go.uber.org/zap"
+
+    "goskeleton/app/global/variable"
+    "goskeleton/app/model"
+)
 
 func CreateMsgRecordModelFactory(sqlType string) *MsgRecordModel {
     return &MsgRecordModel{BaseModel: model.BaseModel{DB: model.UseDbConn(sqlType)}}
@@ -23,4 +28,12 @@ func (m *MsgRecordModel) TableName() string {
 func (m *MsgRecordModel) GetByUserIdAndContentId(userId, contentId int64) (data MsgRecordModel) {
     m.Model(m).Where("fk_user_id = ?", userId).Where("fk_msg_content_id = ?", contentId).Find(&data)
     return
+}
+
+func (m *MsgRecordModel) InsertData(formData *MsgRecordModel) bool {
+    if res := m.Create(formData); res.Error != nil {
+        variable.ZapLog.Error("MsgMediaModel 数据新增出错", zap.Error(res.Error))
+        return false
+    }
+    return true
 }

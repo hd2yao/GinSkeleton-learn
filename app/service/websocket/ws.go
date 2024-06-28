@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"fmt"
+	"goskeleton/app/model/oldster_user"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -37,9 +38,12 @@ func (w *Ws) OnOpen(context *gin.Context) (*Ws, bool) {
 		//client.ClientMoreParams.UserParams1 = "123"
 		//client.ClientMoreParams.UserParams2 = "456"
 		//fmt.Printf("最终每一个客户端(client) 已有的参数：%+v\n", client)
+
 		client.UserId = int64(context.GetFloat64(consts.ValidatorPrefix + "user_id"))
 		client.HomeId = int64(context.GetFloat64(consts.ValidatorPrefix + "home_id"))
 		client.UserType = context.GetString(consts.ValidatorPrefix + "user_type")
+		userInfo := oldster_user.CreateOldsterUserModelFactory("").GetById(client.UserId)
+		client.CityId = int64(userInfo.FkProvinceCityId)
 
 		w.WsClient = client
 		go w.WsClient.Heartbeat() // 一旦握手+协议升级成功，就为每一个连接开启一个自动化的隐式心跳检测包
