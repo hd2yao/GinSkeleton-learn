@@ -35,6 +35,11 @@ func (h *HomeUserModel) UpdateIsCall(userId1, userId2, isCall int) {
 	h.Model(h).Where("id = ? or id = ?", userId1, userId2).Update("is_call", isCall)
 }
 
+// UpdateIsCallOne 更新用户的通话状态为通话对方
+func (h *HomeUserModel) UpdateIsCallOne(userId1, userId2 int) {
+	h.Model(h).Where("id = ?", userId1).Update("is_call", userId2)
+}
+
 // UpdateIsCallToZero 更新用户通话状态为不在通话中
 func (h *HomeUserModel) UpdateIsCallToZero(userId int) {
 	h.Model(h).Where("id = ?", userId).Update("is_call", 0)
