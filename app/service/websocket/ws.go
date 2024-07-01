@@ -3,8 +3,9 @@ package websocket
 import (
 	"encoding/json"
 	"fmt"
-	"goskeleton/app/model/call_log"
+
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -13,6 +14,7 @@ import (
 	"goskeleton/app/global/consts"
 	"goskeleton/app/global/my_errors"
 	"goskeleton/app/global/variable"
+	"goskeleton/app/model/call_log"
 	"goskeleton/app/model/friend_user"
 	"goskeleton/app/model/home_user"
 	"goskeleton/app/model/oldster_user"
@@ -108,12 +110,109 @@ func (w *Ws) OnMessage(context *gin.Context) {
 		//参数说明
 		//messageType 消息类型，1=文本
 		//receivedData 服务器接收到客户端（例如js客户端）发来的的数据，[]byte 格式
+		var receivedJson ReceivedWsClientMsg
 
-		tempMsg := "服务器已经收到了你的消息==>" + string(receivedData)
-		// 回复客户端已经收到消息;
-		if err := w.WsClient.SendMessage(messageType, tempMsg); err != nil {
-			variable.ZapLog.Error("消息发送出现错误", zap.Error(err))
+		if err := json.Unmarshal(receivedData, &receivedJson); err == nil {
+			switch receivedJson.Type {
+			case 2:
+				if w.CheckOnline(receivedJson.UserId) {
+
+				}
+			case 1: // 视频通话
+				// 回复客户端已经收到消息
+				// 被呼叫方在线
+				if w.CheckOnline(receivedJson.UserId) {
+					// 当前用户传来 code = 203 即挂断，向挂断方发送消息
+					if receivedJson.Code == 203 {
+						returnRefusedCall := ReturnClientMsg{}
+						returnRefusedCall.Code = 203
+						returnRefusedCall.Msg = "success"
+						returnRefusedCall.Data.Type = 1
+						returnRefusedCall.Data.UserId = w.WsClient.HomeId
+						returnRefuseCallStr, _ := json.Marshal(returnRefusedCall)
+						home_user.CreateHomeModelFactory("").UpdateIsCall(int(receivedJson.UserId), int(w.WsClient.HomeId), 0)
+						// 向被挂断方定向发送信息
+						w.SendMsgToClient(receivedJson.UserId, w.WsClient.UserType, string(returnRefuseCallStr))
+					} else {
+						// 呼叫方：当前用户 w.WsClient.HomeId
+						// 被呼叫方：receivedJson.UserId
+						// 给被呼叫方发送呼叫方信息以及房间号
+						returnCalled := ReturnClientMsg{}
+						returnCalled.Code = 200
+						returnCalled.Msg = "success"
+						returnCalled.Data.Type = 1
+						returnCalled.Data.UserId = w.WsClient.HomeId
+						roomData := room.CreateRoomModelFactory("").InsertData(int(w.WsClient.HomeId))
+						w.WsClient.RoomId = roomData.Id
+						returnCalled.Data.RoomId = roomData.Id
+
+						// 查询被呼叫方是否有呼叫方好友
+						friendData := friend_user.CreateFriendUserModelFactory("").GetByUserIdAndFriendId(int(receivedJson.UserId), int(w.WsClient.HomeId))
+						userInfo := home_user.CreateHomeModelFactory("").GetHomeUser(w.WsClient.HomeId)
+						returnCalled.Data.DeviceType = userInfo.DeviceType
+						returnCalled.Data.UserIdCallerAvatar = userInfo.Avatar
+						returnCalled.Data.HandFree = friendData.HandsFree
+						if friendData.NickName != "" {
+							returnCalled.Data.UserIdCallerTitle = friendData.NickName
+						} else {
+							returnCalled.Data.UserIdCallerTitle = userInfo.Title
+						}
+						returnCalledStr, _ := json.Marshal(returnCalled)
+
+						// 这里处理一下呼叫状态，呼叫中的人，不能再被呼叫
+						home_user.CreateHomeModelFactory("").UpdateIsCallOne(int(w.WsClient.HomeId), int(receivedJson.UserId))
+						home_user.CreateHomeModelFactory("").UpdateIsCallOne(int(receivedJson.UserId), int(w.WsClient.HomeId))
+
+						// 小程序要延迟三秒发送消息，因为 apk 进入程序有延迟
+						calledUserInfo := home_user.CreateHomeModelFactory("").GetHomeUser(receivedJson.UserId)
+						if w.WsClient.UserType == "web" && calledUserInfo.DeviceType == 2 {
+							// 给呼叫方(当前用户)发送：给被呼叫方发送请求成功 202
+							if err = w.WsClient.SendMessage(messageType, w.SendSuccess(202, int(receivedJson.UserId), "请求发送成功", roomData.Id, calledUserInfo.DeviceType)); err != nil {
+								variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
+							} else {
+								variable.ZapLog.Info("已经发送成功ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + w.SendSuccess(202, int(receivedJson.UserId), "请求发送成功", roomData.Id, calledUserInfo.DeviceType))
+							}
+							time.Sleep(4 * time.Second)
+							// 给被呼叫方发送呼叫方信息以及房间号
+							w.SendMsgToClient(receivedJson.UserId, w.WsClient.UserType, string(returnCalledStr))
+						} else {
+							w.SendMsgToClient(receivedJson.UserId, w.WsClient.UserType, string(returnCalledStr))
+							if err = w.WsClient.SendMessage(messageType, w.SendSuccess(202, int(receivedJson.UserId), "请求发送成功", roomData.Id, calledUserInfo.DeviceType)); err != nil {
+								variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
+							} else {
+								variable.ZapLog.Info("已经发送成功ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + w.SendSuccess(202, int(receivedJson.UserId), "请求发送成功", roomData.Id, calledUserInfo.DeviceType))
+							}
+						}
+					}
+				} else { // 被呼叫方不在线
+					// 给被呼叫方发送通话记录
+					//calledFriendData := friend_user.CreateFriendUserModelFactory("").GetByUserIdAndFriendId(int(receivedJson.UserId), int(w.WsClient.HomeId))
+					//callInfo := home_user.CreateHomeModelFactory("").GetHomeUser(w.WsClient.HomeId)
+					userInfo := home_user.CreateHomeModelFactory("").GetHomeUser(receivedJson.UserId)
+
+					// 如果是小程序，不论在不在线，都会请求发送成功，然后发布订阅消息
+					if userInfo.DeviceType == 2 {
+
+					} else {
+						if err = w.WsClient.SendMessage(messageType, w.GetFail(201, "用户不在线")); err != nil {
+							variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
+						} else {
+							variable.ZapLog.Info("已经发送成功ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + w.GetFail(201, "用户不在线"))
+						}
+					}
+				}
+			case 35:
+			default:
+				variable.ZapLog.Info("收到ws客户端IP("+w.WsClient.ClientIp+")的消息", zap.String("msg", string(receivedData)))
+
+			}
 		}
+
+		//tempMsg := "服务器已经收到了你的消息==>" + string(receivedData)
+		//// 回复客户端已经收到消息;
+		//if err := w.WsClient.SendMessage(messageType, tempMsg); err != nil {
+		//	variable.ZapLog.Error("消息发送出现错误", zap.Error(err))
+		//}
 
 	}, w.OnError, w.OnClose)
 }
@@ -167,4 +266,60 @@ func (w *Ws) BroadcastMsg(sendMsg string) {
 			variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
 		}
 	}
+}
+
+// CheckOnline 判断是否在线
+func (w *Ws) CheckOnline(clientUserId int64) bool {
+	for onlineClient := range w.WsClient.Hub.Clients {
+		if clientUserId == onlineClient.ClientMoreParams.HomeId {
+			return true
+		}
+	}
+	return false
+}
+
+// SendMsgToClient 定向发送消息
+func (w *Ws) SendMsgToClient(clientUserId int64, userType, sendMsg string) {
+	for onlineClient := range w.WsClient.Hub.Clients {
+		if onlineClient.ClientMoreParams.HomeId == clientUserId {
+			// 获取每一个在线的客户端，向远端发送消息
+			if userType == "web" || userType == "mobile" {
+				if onlineClient.ClientMoreParams.UserType == "apk" || onlineClient.ClientMoreParams.UserType == "mobile" {
+					if err := onlineClient.SendMessage(websocket.TextMessage, sendMsg); err != nil {
+						variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
+					} else {
+						variable.ZapLog.Info("已经发送成功;对方ID:" + strconv.Itoa(int(clientUserId)) + sendMsg)
+					}
+					break
+				}
+			} else {
+				if err := onlineClient.SendMessage(websocket.TextMessage, sendMsg); err != nil {
+					variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
+				} else {
+					variable.ZapLog.Info("已经发送成功;对方ID:" + strconv.Itoa(int(clientUserId)) + sendMsg + "对方设备类型：" + onlineClient.ClientMoreParams.UserType)
+				}
+				continue
+			}
+		}
+	}
+}
+
+func (w *Ws) GetFail(code int, msg string) string {
+	returnData := ReturnFiled{}
+	returnData.Code = int64(code)
+	returnData.Msg = msg
+	returnDataStr, _ := json.Marshal(returnData)
+	return string(returnDataStr)
+}
+
+func (w *Ws) SendSuccess(code, userId int, msg string, roomId int64, deviceType int) string {
+	returnData := ReturnClientMsg{}
+	returnData.Code = int64(code)
+	returnData.Msg = msg
+	returnData.Data.Type = 1
+	returnData.Data.UserId = int64(userId)
+	returnData.Data.RoomId = roomId
+	returnData.Data.DeviceType = deviceType
+	returnDataStr, _ := json.Marshal(returnData)
+	return string(returnDataStr)
 }
