@@ -3,6 +3,7 @@ package websocket
 import (
 	"encoding/json"
 	"fmt"
+	"goskeleton/app/service/applet_serv"
 
 	"strconv"
 	"time"
@@ -186,13 +187,35 @@ func (w *Ws) OnMessage(context *gin.Context) {
 					}
 				} else { // 被呼叫方不在线
 					// 给被呼叫方发送通话记录
-					//calledFriendData := friend_user.CreateFriendUserModelFactory("").GetByUserIdAndFriendId(int(receivedJson.UserId), int(w.WsClient.HomeId))
-					//callInfo := home_user.CreateHomeModelFactory("").GetHomeUser(w.WsClient.HomeId)
+					calledFriendData := friend_user.CreateFriendUserModelFactory("").GetByUserIdAndFriendId(int(receivedJson.UserId), int(w.WsClient.HomeId))
+					callInfo := home_user.CreateHomeModelFactory("").GetHomeUser(w.WsClient.HomeId)
 					userInfo := home_user.CreateHomeModelFactory("").GetHomeUser(receivedJson.UserId)
 
 					// 如果是小程序，不论在不在线，都会请求发送成功，然后发布订阅消息
 					if userInfo.DeviceType == 2 {
-
+						callTitle := ""
+						if calledFriendData.NickName != "" {
+							callTitle = calledFriendData.NickName
+						} else {
+							callTitle = callInfo.Title
+						}
+						// 向小程序推送订阅消息
+						msgErr := applet_serv.GetMessageServ().SendMessage(userInfo.Openid, userInfo.Title, callTitle)
+						if msgErr != nil {
+							w.WsClient.SendMessage(messageType, w.GetFail(204, "订阅消息发送失败"))
+						} else {
+							if receivedJson.Code != 203 {
+								roomData := room.CreateRoomModelFactory("").InsertData(int(w.WsClient.HomeId))
+								w.WsClient.RoomId = roomData.Id
+								if err = w.WsClient.SendMessage(messageType, w.SendSuccess(202, int(receivedJson.UserId), "请求发送成功", roomData.Id, userInfo.DeviceType)); err != nil {
+									variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
+								} else {
+									variable.ZapLog.Info("已经发送成功ID:" + strconv.Itoa(int(w.WsClient.HomeId)) + w.SendSuccess(202, int(receivedJson.UserId), "请求发送成功", roomData.Id, userInfo.DeviceType))
+								}
+								home_user.CreateHomeModelFactory("").UpdateIsCallOne(int(receivedJson.UserId), int(w.WsClient.HomeId))
+								home_user.CreateHomeModelFactory("").UpdateIsCallOne(int(w.WsClient.HomeId), int(receivedJson.UserId))
+							}
+						}
 					} else {
 						if err = w.WsClient.SendMessage(messageType, w.GetFail(201, "用户不在线")); err != nil {
 							variable.ZapLog.Error(my_errors.ErrorsWebsocketWriteMgsFail, zap.Error(err))
