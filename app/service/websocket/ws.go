@@ -74,11 +74,13 @@ func (w *Ws) OnOpen(context *gin.Context) (*Ws, bool) {
 				// 呼叫方创建的视频通话房间
 				returnCalled.Data.RoomId = room.CreateRoomModelFactory("").GetRoomId(callId)
 
-				// 查询是否给呼叫方设置备注
+				// 查询是否给呼叫方设置备注以及呼叫方的相关信息
+				// GetByUserIdAndFriendId() 方法中会先初始化，因此当没有查询到结果，返回的也都是数据类型的默认值
 				callFriendData := friend_user.CreateFriendUserModelFactory("").GetByUserIdAndFriendId(int(w.WsClient.HomeId), callId)
 				userInfo := home_user.CreateHomeModelFactory("").GetHomeUser(int64(callId))
 				returnCalled.Data.DeviceType = userInfo.DeviceType
 				returnCalled.Data.UserIdCallerAvatar = userInfo.Avatar
+				// 也就是说 当没有好友信息时，callFriendData 是一个空的 FriendUserModel{} 而不是 nil
 				returnCalled.Data.HandFree = callFriendData.HandsFree
 				if callFriendData.NickName != "" {
 					returnCalled.Data.UserIdCallerTitle = callFriendData.NickName
